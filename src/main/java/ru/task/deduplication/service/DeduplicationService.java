@@ -1,5 +1,8 @@
 package ru.task.deduplication.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.codec.binary.Hex;
 import org.springframework.stereotype.Service;
@@ -9,36 +12,53 @@ import ru.task.deduplication.repository.RequestRepository;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
 public class DeduplicationService {
     private final RequestRepository requestRepository;
+    private final ObjectMapper objectMapper;
 
     @Transactional
     public Optional<Long> findDuplicateRequest(String jsonPayload) {
         String hash = calculateRequestHash(jsonPayload);
-        Optional<Request> duplicate = requestRepository.findActiveByHash(hash);
-
-        if (duplicate.isPresent()) {
-            Request request = duplicate.get();
-            request.setDuplicateCount(request.getDuplicateCount() + 1);
-            requestRepository.save(request);
-            return Optional.of(request.getId());
-        }
-
-        return Optional.empty();
+        Optional<Request> activeRequest = requestRepository.findActiveByHash(hash);
+        return activeRequest.map(Request::getId);
     }
 
     public String calculateRequestHash(String json) {
         try {
+            JsonNode node = objectMapper.readTree(json);
+            if (node.isObject()) {
+                node = sortObjectNode((ObjectNode) node);
+            }
+            String normalizedJson = objectMapper.writeValueAsString(node);
+
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(json.getBytes(StandardCharsets.UTF_8));
+            byte[] hash = digest.digest(normalizedJson.getBytes(StandardCharsets.UTF_8));
             return Hex.encodeHexString(hash);
-        } catch (NoSuchAlgorithmException e) {
+        } catch (Exception e) {
             throw new RuntimeException("Hash calculation failed", e);
         }
+    }
+
+    private JsonNode sortObjectNode(ObjectNode node) {
+        ObjectNode sortedNode = objectMapper.createObjectNode();
+        List<String> fieldNames = new ArrayList<>();
+        node.fieldNames().forEachRemaining(fieldNames::add);
+        Collections.sort(fieldNames);
+
+        for (String fieldName : fieldNames) {
+            JsonNode fieldValue = node.get(fieldName);
+            if (fieldValue.isObject()) {
+                fieldValue = sortObjectNode((ObjectNode) fieldValue);
+            }
+            sortedNode.set(fieldName, fieldValue);
+        }
+        return sortedNode;
     }
 }
