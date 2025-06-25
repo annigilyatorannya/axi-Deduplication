@@ -1,5 +1,6 @@
 package ru.task.deduplication.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -7,11 +8,15 @@ import lombok.RequiredArgsConstructor;
 import org.apache.commons.codec.binary.Hex;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import ru.task.deduplication.dto.ErrorResponse;
+import ru.task.deduplication.exception.DeduplicationException;
+import ru.task.deduplication.exception.ExceptionHandler;
 import ru.task.deduplication.model.Request;
 import ru.task.deduplication.repository.RequestRepository;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -41,8 +46,9 @@ public class DeduplicationService {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hash = digest.digest(normalizedJson.getBytes(StandardCharsets.UTF_8));
             return Hex.encodeHexString(hash);
-        } catch (Exception e) {
-            throw new RuntimeException("Hash calculation failed", e);
+        } catch (JsonProcessingException | NoSuchAlgorithmException e) {
+            ErrorResponse error = ExceptionHandler.handleException(e, "/calculate-hash");
+            throw new DeduplicationException(error);
         }
     }
 
